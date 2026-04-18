@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>/*__BRANDING_CSS__*/</style>
+    <style>
+      .wrap { display: flex; flex-direction: column; height: 100vh; }
+      .controls { padding: 12px; display: flex; flex-direction: column; gap: 10px; flex: 0 0 auto; }
+      .preview {
+        flex: 1 1 auto;
+        overflow: auto;
+        background: var(--bg-secondary);
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        padding: 8px;
+      }
+      .preview pre {
+        margin: 0;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        line-height: 1.05;
+        color: var(--text-heading);
+        white-space: pre;
+      }
+      .row { display: flex; gap: 8px; align-items: flex-end; }
+      .row > * { flex: 1; }
+      .actions { padding: 12px; display: flex; gap: 8px; flex: 0 0 auto; }
+      textarea { resize: none; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="controls">
+        <div>
+          <label for="text">Text</label>
+          <textarea id="text" rows="2" placeholder="Type your banner…">EZASCII</textarea>
+        </div>
+        <div class="row">
+          <div>
+            <label for="font">Font</label>
+            <select id="font"></select>
+          </div>
+          <div>
+            <label for="size">Size (px)</label>
+            <select id="size">
+              <option>12</option><option selected>14</option>
+              <option>16</option><option>18</option><option>24</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label for="align">Align</label>
+          <select id="align">
+            <option value="LEFT" selected>Left</option>
+            <option value="CENTER">Center</option>
+            <option value="RIGHT">Right</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="preview"><pre id="preview"></pre></div>
+
+      <div class="actions">
+        <button id="insert" class="primary" style="flex:1">Insert into Figma</button>
+      </div>
+
+      <div id="footer-slot"></div>
+    </div>
+
+    <script>/*__UI_JS__*/</script>
+  </body>
+</html>
