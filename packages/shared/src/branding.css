@@ -1,0 +1,107 @@
+/* @ezascii/shared branding — imported by each plugin UI */
+:root {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #151515;
+  --text-heading: #ebebeb;
+  --text-primary: #d0d0d0;
+  --text-secondary: #888888;
+  --text-tertiary: #555555;
+  --accent: #ebebeb;
+  --accent-hover: #ffffff;
+  --line: #2a2a2a;
+  --danger: #ef4444;
+  --font-mono: 'Courier New', Courier, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ezascii-cta-footer {
+  border-top: 1px solid var(--line);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+}
+
+.ezascii-cta-footer a {
+  color: var(--text-heading);
+  text-decoration: none;
+}
+
+.ezascii-cta-footer a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+button.primary,
+button.secondary {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: background-color 0.12s;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+button.primary:hover {
+  background: var(--accent-hover);
+}
+
+button.primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+button.secondary:hover {
+  background: var(--bg-secondary);
+}
+
+input[type='text'],
+textarea,
+select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  width: 100%;
+}
+
+input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  display: block;
+  margin-bottom: 4px;
+}
