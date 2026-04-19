@@ -1,4 +1,4 @@
-import { FONTS, DEFAULT_FONT, renderFigletText, buildCtaUrl } from '@ezascii/shared';
+import { FONTS, DEFAULT_FONT, renderFigletText, buildCtaUrl, mountBmcLink } from '@ezascii/shared';
 
 function showFatalError(err: unknown, stage: string) {
   const msg = err instanceof Error ? `${err.message}\n\n${err.stack ?? ''}` : String(err);
@@ -71,6 +71,9 @@ try {
   upgradeEl.addEventListener('click', () => {
     window.open(buildCtaUrl('/text-to-ascii-art', 'text-plugin'), '_blank', 'noopener');
   });
+
+  const bmcSlot = document.getElementById('bmc-slot') as HTMLDivElement;
+  if (bmcSlot) mountBmcLink(bmcSlot);
 
   refreshPreview();
 } catch (err) {

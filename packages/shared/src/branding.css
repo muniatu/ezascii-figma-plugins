@@ -105,3 +105,19 @@ label {
   display: block;
   margin-bottom: 4px;
 }
+
+.ezascii-bmc-wrap {
+  text-align: center;
+  padding: 8px 12px 12px;
+}
+
+.ezascii-bmc-link {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-decoration: none;
+  transition: color 0.12s;
+}
+
+.ezascii-bmc-link:hover {
+  color: var(--text-heading);
+}
