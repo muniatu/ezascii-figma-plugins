@@ -83,13 +83,29 @@ button.secondary:hover {
 }
 
 button.secondary .cta-accent {
-  color: var(--text-heading);
-  font-weight: 600;
-  margin-left: 2px;
+  color: var(--accent-hover);
+  font-weight: 700;
+  margin-left: 3px;
+  border-bottom: 1px solid var(--accent-hover);
 }
 
 button.secondary:hover .cta-accent {
   color: var(--accent-hover);
+  border-bottom-color: var(--accent-hover);
+}
+
+.cta-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cta-label {
+  margin: 0;
+  padding: 0 2px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
 }
 
 input[type='text'],
