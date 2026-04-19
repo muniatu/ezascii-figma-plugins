@@ -1,0 +1,109 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>/*__BRANDING_CSS__*/</style>
+    <style>
+      .wrap { display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--line);
+        overflow-y: auto;
+      }
+      .status {
+        padding: 10px 12px;
+        font-size: 11px;
+        color: var(--text-secondary);
+        border-bottom: 1px solid var(--line);
+        background: var(--bg-secondary);
+      }
+      .status.active { color: var(--text-heading); }
+      .controls { padding: 12px; display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; }
+      .row { display: flex; gap: 8px; }
+      .row > * { flex: 1; }
+      .checkboxes { display: flex; gap: 14px; padding-top: 2px; }
+      .checkboxes label { display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; }
+      .actions { padding: 12px; flex: 0 0 auto; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+
+      .preview-pane {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: auto;
+        background: var(--bg-secondary);
+        padding: 16px;
+      }
+      .preview-pane pre {
+        margin: 0;
+        font-family: var(--font-mono);
+        font-size: 7px;
+        line-height: 1;
+        color: var(--text-heading);
+        white-space: pre;
+        background: var(--bg-primary);
+        padding: 12px;
+        border: 1px solid var(--line);
+      }
+      .preview-pane .empty {
+        color: var(--text-tertiary);
+        font-size: 12px;
+        text-align: center;
+        max-width: 280px;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="sidebar">
+        <div id="status" class="status">Select an image or frame in Figma</div>
+
+        <div class="controls">
+          <div>
+            <label for="blockSize">Block size: <span id="blockSizeVal">8</span>px</label>
+            <input id="blockSize" type="range" min="4" max="20" step="1" value="8" />
+          </div>
+
+          <div>
+            <label for="charset">Character set</label>
+            <select id="charset">
+              <option value="simple">Simple</option>
+              <option value="standard" selected>Standard</option>
+              <option value="detailed">Detailed</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="output">Output</label>
+            <select id="output">
+              <option value="text" selected>Text layer</option>
+              <option value="image">Rendered image</option>
+            </select>
+          </div>
+
+          <div class="checkboxes">
+            <label><input id="invert" type="checkbox" /> Invert</label>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="convert" class="primary" disabled>Convert</button>
+          <button id="upgrade" class="secondary" type="button">
+            Use our free tool with more controls on ezascii.com →
+          </button>
+          <div id="bmc-slot"></div>
+        </div>
+      </div>
+
+      <div class="preview-pane">
+        <pre id="preview"></pre>
+        <div id="preview-empty" class="empty">
+          Select an image or frame in Figma to preview its ASCII version here.
+        </div>
+      </div>
+    </div>
+
+    <script>/*__UI_JS__*/</script>
+  </body>
+</html>
