@@ -1,4 +1,4 @@
-figma.showUI(__html__, { width: 340, height: 440, title: 'ASCII Text Art Generator' });
+figma.showUI(__html__, { width: 480, height: 600, title: 'ASCII Text Art Generator' });
 
 type IncomingMsg = {
   type: 'insert-text';
