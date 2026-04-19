@@ -75,11 +75,21 @@ button.primary:disabled {
 
 button.secondary {
   background: transparent;
-  color: var(--text-primary);
+  color: var(--text-secondary);
 }
 
 button.secondary:hover {
   background: var(--bg-secondary);
+}
+
+button.secondary .cta-accent {
+  color: var(--text-heading);
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+button.secondary:hover .cta-accent {
+  color: var(--accent-hover);
 }
 
 input[type='text'],
