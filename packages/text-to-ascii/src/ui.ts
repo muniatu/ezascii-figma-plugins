@@ -1,6 +1,5 @@
 import { FONTS, DEFAULT_FONT, renderFigletText, mountCtaFooter } from '@ezascii/shared';
 
-// Surface any error to the plugin iframe so we don't end up with a silent blank UI.
 function showFatalError(err: unknown, stage: string) {
   const msg = err instanceof Error ? `${err.message}\n\n${err.stack ?? ''}` : String(err);
   // eslint-disable-next-line no-console
@@ -25,7 +24,6 @@ try {
   const insertEl = document.getElementById('insert') as HTMLButtonElement;
   const footerSlot = document.getElementById('footer-slot') as HTMLDivElement;
 
-  // Populate font dropdown
   for (const f of FONTS) {
     const opt = document.createElement('option');
     opt.value = f.label;
