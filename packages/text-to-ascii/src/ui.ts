@@ -77,6 +77,39 @@ try {
     campaign: 'text-plugin',
   });
 
+  // ── Resize handle ──────────────────────────────────────────────────
+  const handle = document.getElementById('resize-handle');
+  if (handle) {
+    const MIN_W = 360;
+    const MIN_H = 400;
+    let dragging = false;
+
+    handle.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const w = Math.max(MIN_W, Math.floor(e.clientX));
+      const h = Math.max(MIN_H, Math.floor(e.clientY));
+      parent.postMessage({ pluginMessage: { type: 'resize', width: w, height: h } }, '*');
+    });
+
+    handle.addEventListener('pointerup', (e) => {
+      dragging = false;
+      handle.releasePointerCapture(e.pointerId);
+      // Persist the final size
+      const w = Math.max(MIN_W, Math.floor(e.clientX));
+      const h = Math.max(MIN_H, Math.floor(e.clientY));
+      parent.postMessage(
+        { pluginMessage: { type: 'resize', width: w, height: h, persist: true } },
+        '*',
+      );
+    });
+  }
+
   refreshPreview();
 } catch (err) {
   showFatalError(err, 'bootstrap');
