@@ -1,4 +1,4 @@
-import { FONTS, DEFAULT_FONT, renderFigletText, mountCtaFooter } from '@ezascii/shared';
+import { FONTS, DEFAULT_FONT, renderFigletText, buildCtaUrl } from '@ezascii/shared';
 
 function showFatalError(err: unknown, stage: string) {
   const msg = err instanceof Error ? `${err.message}\n\n${err.stack ?? ''}` : String(err);
@@ -22,7 +22,7 @@ try {
   const alignEl = document.getElementById('align') as HTMLSelectElement;
   const previewEl = document.getElementById('preview') as HTMLPreElement;
   const insertEl = document.getElementById('insert') as HTMLButtonElement;
-  const footerSlot = document.getElementById('footer-slot') as HTMLDivElement;
+  const upgradeEl = document.getElementById('upgrade') as HTMLButtonElement;
 
   for (const f of FONTS) {
     const opt = document.createElement('option');
@@ -68,11 +68,8 @@ try {
     }
   });
 
-  mountCtaFooter(footerSlot, {
-    label: 'Need more fonts?',
-    linkText: 'All 300 on ezascii.com →',
-    targetPath: '/text-to-ascii-art',
-    campaign: 'text-plugin',
+  upgradeEl.addEventListener('click', () => {
+    window.open(buildCtaUrl('/text-to-ascii-art', 'text-plugin'), '_blank', 'noopener');
   });
 
   refreshPreview();
