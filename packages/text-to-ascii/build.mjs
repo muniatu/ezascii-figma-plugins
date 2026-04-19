@@ -1,7 +1,7 @@
 // esbuild pipeline for the Figma Text-to-ASCII plugin.
 // Produces: dist/code.js, dist/ui.html (with inlined JS+CSS), dist/manifest.json
 import { build, context } from 'esbuild';
-import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
 const watch = process.argv.includes('--watch');
 const outDir = 'dist';
@@ -55,13 +55,8 @@ async function bundleHtml() {
   await writeFile(`${outDir}/ui.html`, inlined);
 }
 
-async function copyManifest() {
-  await copyFile('manifest.json', `${outDir}/manifest.json`);
-}
-
 await Promise.all([buildCode(), buildUi()]);
 await bundleHtml();
-await copyManifest();
 
 if (watch) {
   console.log('Watching for changes…');
