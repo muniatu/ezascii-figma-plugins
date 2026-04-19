@@ -112,16 +112,24 @@ try {
     convertEl.disabled = true;
   }
 
+  // Courier New character cell is ~0.5× as wide as it is tall.
+  // Used when the output will be displayed with a real monospace text renderer.
+  const MONO_CHAR_ASPECT = 0.5;
+
   function refreshPreview() {
     if (!currentImageData) return;
     const blockSize = parseInt(blockSizeEl.value, 10);
+    const mode = outputEl.value as 'text' | 'image';
+    // Text mode will render into a Figma TextNode (Courier New) so we reduce
+    // row count to compensate. Image mode paints into a canvas where each
+    // character cell is a square block of pixels — no correction needed.
     const grid = renderAsciiTextGrid(currentImageData, {
       charset: getCharset(charsetEl.value as CharsetKey),
       blockSize,
       invert: invertEl.checked,
+      charAspectRatio: mode === 'text' ? MONO_CHAR_ASPECT : 1.0,
     });
 
-    const mode = outputEl.value as 'text' | 'image';
     emptyEl.style.display = 'none';
 
     if (mode === 'text') {
@@ -164,6 +172,8 @@ try {
         charset: getCharset(charsetEl.value as CharsetKey),
         blockSize,
         invert: invertEl.checked,
+        // Match what the preview shows: correct aspect for text, square cells for canvas.
+        charAspectRatio: outputType === 'text' ? MONO_CHAR_ASPECT : 1.0,
       });
 
       if (outputType === 'text') {
