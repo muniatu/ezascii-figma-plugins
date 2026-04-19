@@ -45,6 +45,13 @@
         padding: 12px;
         border: 1px solid var(--line);
       }
+      .preview-pane canvas {
+        max-width: 100%;
+        max-height: 100%;
+        background: var(--bg-primary);
+        border: 1px solid var(--line);
+        image-rendering: pixelated;
+      }
       .preview-pane .empty {
         color: var(--text-tertiary);
         font-size: 12px;
@@ -102,6 +109,7 @@
 
       <div class="preview-pane">
         <pre id="preview"></pre>
+        <canvas id="preview-canvas"></canvas>
         <div id="preview-empty" class="empty">
           Select an image or frame in Figma to preview its ASCII version here.
         </div>

@@ -2,6 +2,7 @@ import {
   renderAsciiTextGrid,
   getCharset,
   type CharsetKey,
+  type AsciiGrid,
   buildCtaUrl,
   mountBmcLink,
 } from '@ezascii/shared';
@@ -21,6 +22,61 @@ function showFatalError(err: unknown, stage: string) {
 window.addEventListener('error', (e) => showFatalError(e.error ?? e.message, 'runtime'));
 window.addEventListener('unhandledrejection', (e) => showFatalError(e.reason, 'promise'));
 
+/**
+ * Paint the ASCII grid onto a 2D context in the source's sampled colors.
+ * Monochrome = white on black (matches what a Figma text layer looks like).
+ * Color = each character uses the average RGB of its source block.
+ * Shared between the canvas preview and the "Paste in Figma" image export.
+ */
+function paintAsciiCanvas(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  grid: AsciiGrid,
+  src: ImageData | null,
+  blockSize: number,
+  color: 'mono' | 'sampled',
+): void {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, grid.cols * blockSize, grid.rows * blockSize);
+  ctx.font = `${blockSize}px "Courier New", monospace`;
+  ctx.textBaseline = 'top';
+
+  const sampleW = src ? src.width / grid.cols : 0;
+  const sampleH = src ? src.height / grid.rows : 0;
+
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const ch = grid.lines[r][c] ?? ' ';
+      if (ch === ' ') continue;
+
+      if (color === 'sampled' && src) {
+        const startX = Math.floor(c * sampleW);
+        const startY = Math.floor(r * sampleH);
+        const endX = Math.min(Math.floor((c + 1) * sampleW), src.width);
+        const endY = Math.min(Math.floor((r + 1) * sampleH), src.height);
+        let tr = 0;
+        let tg = 0;
+        let tb = 0;
+        let n = 0;
+        for (let y = startY; y < endY; y++) {
+          for (let x = startX; x < endX; x++) {
+            const i = (y * src.width + x) * 4;
+            tr += src.data[i];
+            tg += src.data[i + 1];
+            tb += src.data[i + 2];
+            n++;
+          }
+        }
+        if (n === 0) continue;
+        ctx.fillStyle = `rgb(${Math.floor(tr / n)},${Math.floor(tg / n)},${Math.floor(tb / n)})`;
+      } else {
+        ctx.fillStyle = '#fff';
+      }
+
+      ctx.fillText(ch, c * blockSize, r * blockSize);
+    }
+  }
+}
+
 try {
   const statusEl = document.getElementById('status') as HTMLDivElement;
   const blockSizeEl = document.getElementById('blockSize') as HTMLInputElement;
@@ -29,16 +85,15 @@ try {
   const outputEl = document.getElementById('output') as HTMLSelectElement;
   const invertEl = document.getElementById('invert') as HTMLInputElement;
   const previewEl = document.getElementById('preview') as HTMLPreElement;
+  const previewCanvasEl = document.getElementById('preview-canvas') as HTMLCanvasElement;
   const emptyEl = document.getElementById('preview-empty') as HTMLDivElement;
   const convertEl = document.getElementById('convert') as HTMLButtonElement;
   const upgradeEl = document.getElementById('upgrade') as HTMLButtonElement;
   const bmcSlot = document.getElementById('bmc-slot') as HTMLDivElement;
 
   let currentImageData: ImageData | null = null;
-  let currentPngBytes: Uint8Array | null = null;
 
   async function decodeToImageData(bytes: Uint8Array): Promise<ImageData> {
-    // copy bytes into a fresh ArrayBuffer to satisfy strict Blob constructor typing
     const copy = new Uint8Array(bytes);
     const blob = new Blob([copy], { type: 'image/png' });
     const bitmap = await createImageBitmap(blob);
@@ -53,19 +108,36 @@ try {
     emptyEl.textContent = msg;
     emptyEl.style.display = 'block';
     previewEl.style.display = 'none';
+    previewCanvasEl.style.display = 'none';
     convertEl.disabled = true;
   }
 
   function refreshPreview() {
     if (!currentImageData) return;
+    const blockSize = parseInt(blockSizeEl.value, 10);
     const grid = renderAsciiTextGrid(currentImageData, {
       charset: getCharset(charsetEl.value as CharsetKey),
-      blockSize: parseInt(blockSizeEl.value, 10),
+      blockSize,
       invert: invertEl.checked,
     });
-    previewEl.textContent = grid.lines.join('\n');
-    previewEl.style.display = '';
+
+    const mode = outputEl.value as 'text' | 'image';
     emptyEl.style.display = 'none';
+
+    if (mode === 'text') {
+      previewEl.textContent = grid.lines.join('\n');
+      previewEl.style.display = '';
+      previewCanvasEl.style.display = 'none';
+    } else {
+      // Color canvas preview — matches what Paste in Figma will output.
+      previewCanvasEl.width = grid.cols * blockSize;
+      previewCanvasEl.height = grid.rows * blockSize;
+      const ctx = previewCanvasEl.getContext('2d');
+      if (ctx) paintAsciiCanvas(ctx, grid, currentImageData, blockSize, 'sampled');
+      previewCanvasEl.style.display = '';
+      previewEl.style.display = 'none';
+    }
+
     convertEl.disabled = false;
   }
 
@@ -80,10 +152,11 @@ try {
     schedulePreview();
   });
   charsetEl.addEventListener('change', refreshPreview);
+  outputEl.addEventListener('change', refreshPreview);
   invertEl.addEventListener('change', refreshPreview);
 
   convertEl.addEventListener('click', async () => {
-    if (!currentImageData || !currentPngBytes) return;
+    if (!currentImageData) return;
     try {
       const outputType = outputEl.value as 'text' | 'image';
       const blockSize = parseInt(blockSizeEl.value, 10);
@@ -101,54 +174,11 @@ try {
         return;
       }
 
-      // Rendered image: paint ASCII onto an OffscreenCanvas in the source's
-      // sampled colors (average RGB per block) — gives a color ASCII result
-      // that's visually distinct from the monochrome text-layer output.
+      // Rendered image = sampled color, same paint function as preview.
       const canvas = new OffscreenCanvas(grid.cols * blockSize, grid.rows * blockSize);
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Could not get 2D context');
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.font = `${blockSize}px "Courier New", monospace`;
-      ctx.textBaseline = 'top';
-
-      const src = currentImageData;
-      const sampleW = src.width / grid.cols;
-      const sampleH = src.height / grid.rows;
-
-      for (let r = 0; r < grid.rows; r++) {
-        for (let c = 0; c < grid.cols; c++) {
-          const ch = grid.lines[r][c] ?? ' ';
-          if (ch === ' ') continue;
-
-          // Sample average color from the corresponding block in the source image
-          const startX = Math.floor(c * sampleW);
-          const startY = Math.floor(r * sampleH);
-          const endX = Math.min(Math.floor((c + 1) * sampleW), src.width);
-          const endY = Math.min(Math.floor((r + 1) * sampleH), src.height);
-
-          let totalR = 0;
-          let totalG = 0;
-          let totalB = 0;
-          let count = 0;
-          for (let y = startY; y < endY; y++) {
-            for (let x = startX; x < endX; x++) {
-              const i = (y * src.width + x) * 4;
-              totalR += src.data[i];
-              totalG += src.data[i + 1];
-              totalB += src.data[i + 2];
-              count++;
-            }
-          }
-          if (count === 0) continue;
-
-          const avgR = Math.floor(totalR / count);
-          const avgG = Math.floor(totalG / count);
-          const avgB = Math.floor(totalB / count);
-          ctx.fillStyle = `rgb(${avgR},${avgG},${avgB})`;
-          ctx.fillText(ch, c * blockSize, r * blockSize);
-        }
-      }
+      paintAsciiCanvas(ctx, grid, currentImageData, blockSize, 'sampled');
       const blob = await canvas.convertToBlob({ type: 'image/png' });
       const outBytes = new Uint8Array(await blob.arrayBuffer());
       parent.postMessage(
@@ -181,8 +211,7 @@ try {
 
     if (m.type === 'image-bytes' && m.bytes) {
       try {
-        currentPngBytes = new Uint8Array(m.bytes);
-        currentImageData = await decodeToImageData(currentPngBytes);
+        currentImageData = await decodeToImageData(new Uint8Array(m.bytes));
         statusEl.classList.add('active');
         statusEl.textContent = `✓ Image loaded — ${currentImageData.width}×${currentImageData.height}`;
         refreshPreview();
@@ -195,7 +224,6 @@ try {
       }
     } else if (m.type === 'no-selection') {
       currentImageData = null;
-      currentPngBytes = null;
       statusEl.classList.remove('active');
       statusEl.textContent = 'Select an image or frame in Figma';
       setEmpty('Select an image or frame in Figma to preview its ASCII version here.');
