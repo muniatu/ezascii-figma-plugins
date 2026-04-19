@@ -101,18 +101,52 @@ try {
         return;
       }
 
-      // Rendered image: paint ASCII onto an OffscreenCanvas and send the PNG bytes.
+      // Rendered image: paint ASCII onto an OffscreenCanvas in the source's
+      // sampled colors (average RGB per block) — gives a color ASCII result
+      // that's visually distinct from the monochrome text-layer output.
       const canvas = new OffscreenCanvas(grid.cols * blockSize, grid.rows * blockSize);
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Could not get 2D context');
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#fff';
       ctx.font = `${blockSize}px "Courier New", monospace`;
       ctx.textBaseline = 'top';
+
+      const src = currentImageData;
+      const sampleW = src.width / grid.cols;
+      const sampleH = src.height / grid.rows;
+
       for (let r = 0; r < grid.rows; r++) {
         for (let c = 0; c < grid.cols; c++) {
-          ctx.fillText(grid.lines[r][c] ?? ' ', c * blockSize, r * blockSize);
+          const ch = grid.lines[r][c] ?? ' ';
+          if (ch === ' ') continue;
+
+          // Sample average color from the corresponding block in the source image
+          const startX = Math.floor(c * sampleW);
+          const startY = Math.floor(r * sampleH);
+          const endX = Math.min(Math.floor((c + 1) * sampleW), src.width);
+          const endY = Math.min(Math.floor((r + 1) * sampleH), src.height);
+
+          let totalR = 0;
+          let totalG = 0;
+          let totalB = 0;
+          let count = 0;
+          for (let y = startY; y < endY; y++) {
+            for (let x = startX; x < endX; x++) {
+              const i = (y * src.width + x) * 4;
+              totalR += src.data[i];
+              totalG += src.data[i + 1];
+              totalB += src.data[i + 2];
+              count++;
+            }
+          }
+          if (count === 0) continue;
+
+          const avgR = Math.floor(totalR / count);
+          const avgG = Math.floor(totalG / count);
+          const avgB = Math.floor(totalB / count);
+          ctx.fillStyle = `rgb(${avgR},${avgG},${avgB})`;
+          ctx.fillText(ch, c * blockSize, r * blockSize);
         }
       }
       const blob = await canvas.convertToBlob({ type: 'image/png' });
