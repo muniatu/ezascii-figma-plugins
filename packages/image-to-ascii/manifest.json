@@ -1,6 +1,6 @@
 {
-  "name": "ASCII Text Art Generator",
-  "id": "ezascii-text-to-ascii",
+  "name": "Image to ASCII Art",
+  "id": "ezascii-image-to-ascii",
   "api": "1.0.0",
   "main": "dist/code.js",
   "ui": "dist/ui.html",

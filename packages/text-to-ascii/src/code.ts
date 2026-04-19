@@ -1,13 +1,14 @@
-figma.showUI(__html__, { width: 340, height: 440, title: 'ASCII Text Art Generator' });
+// Fixed 16:9 window, wide enough to comfortably preview big FIGlet banners.
+figma.showUI(__html__, { width: 960, height: 540, title: 'ASCII Text Art Generator' });
 
-type IncomingMsg = {
+type InsertMsg = {
   type: 'insert-text';
   ascii: string;
   fontSize: number;
   align: 'LEFT' | 'CENTER' | 'RIGHT';
 };
 
-figma.ui.onmessage = async (msg: IncomingMsg) => {
+figma.ui.onmessage = async (msg: InsertMsg) => {
   if (msg.type !== 'insert-text') return;
 
   try {

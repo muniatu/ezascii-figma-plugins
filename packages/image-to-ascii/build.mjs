@@ -1,5 +1,5 @@
-// esbuild pipeline for the Figma Text-to-ASCII plugin.
-// Produces: dist/code.js, dist/ui.html (with inlined JS+CSS), dist/manifest.json
+// esbuild pipeline for the Figma Image-to-ASCII plugin.
+// Produces: dist/code.js, dist/ui.html (with inlined JS+CSS)
 import { build, context } from 'esbuild';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
@@ -47,14 +47,12 @@ async function buildUi() {
 async function bundleHtml() {
   // Inline UI script + shared branding CSS into a single ui.html.
   //
-  // Two traps we guard against:
-  //   1. `</script>` substrings inside bundled JS (e.g. in FIGlet glyph data)
-  //      terminate the wrapping <script> tag when Figma injects via document.write.
-  //   2. `String.prototype.replace(pattern, replacementString)` interprets `$'`,
-  //      `$&`, `$\``, `$$`, `$n` in the replacement as special patterns. FIGlet
-  //      glyphs contain literal `$'` which otherwise gets expanded to "everything
-  //      after the match" — injecting phantom `</script></body></html>` chunks.
-  //      Solution: pass a FUNCTION as the replacement, which skips pattern processing.
+  // Two traps we guard against (same as text plugin):
+  //   1. Literal </script> in bundled JS kills the wrapping tag when Figma
+  //      injects via document.write.
+  //   2. String.prototype.replace with a string replacement interprets $',
+  //      $&, $`, $$, $n as special patterns. Use a function replacement to
+  //      skip this processing.
   const html = await readFile('src/ui.html', 'utf8');
   const rawJs = await readFile(`${outDir}/ui.js`, 'utf8').catch(() => '');
   const css = await readFile('../shared/src/branding.css', 'utf8');

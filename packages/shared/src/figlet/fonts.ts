@@ -1,4 +1,8 @@
-import type figlet from 'figlet';
+// figlet 1.11 ships its own types that conflict with @types/figlet.
+// We don't need a narrow literal union — parseFont + textSync accept string
+// names, and we control which ones are registered. Plain string keeps this
+// portable across figlet version bumps.
+type FigletFontName = string;
 
 // 20 hand-picked fonts, imported individually so esbuild/vite only bundles these.
 // Default export from each module is the raw .flf content as a string.
@@ -25,7 +29,7 @@ import Thin from 'figlet/importable-fonts/Thin.js';
 
 export interface FontEntry {
   label: string; // human-facing picker label
-  figletName: figlet.Fonts; // name figlet.parseFont expects
+  figletName: FigletFontName; // name figlet.parseFont expects
   data: string; // raw .flf contents
 }
 

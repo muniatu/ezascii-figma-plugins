@@ -8,6 +8,17 @@ export interface RenderOptions {
   charset: string;
   blockSize: number;
   invert: boolean;
+  /**
+   * Character aspect ratio (width / height) of the renderer that will
+   * display the output. Monospace text like Courier New is roughly 0.5.
+   * Defaults to 1.0 (square cells, correct when rendering to a canvas
+   * where each character is drawn into a blockSize×blockSize pixel block).
+   *
+   * When rendering will be displayed with a real monospace font (e.g. a
+   * Figma text layer), set this to ~0.5 so the row count is reduced to
+   * compensate — otherwise a square image becomes a tall rectangle.
+   */
+  charAspectRatio?: number;
 }
 
 export interface AsciiGrid {
@@ -24,8 +35,10 @@ export function renderAsciiTextGrid(img: RenderInput, opts: RenderOptions): Asci
   const { width, height, data } = img;
   const { charset, blockSize, invert } = opts;
 
+  const charAspect = opts.charAspectRatio ?? 1.0;
   const cols = Math.max(1, Math.floor(width / blockSize));
-  const rows = Math.max(1, Math.floor(height / blockSize));
+  // For non-square char cells we need fewer rows to preserve source aspect.
+  const rows = Math.max(1, Math.floor((height / blockSize) * charAspect));
 
   const sampleW = width / cols;
   const sampleH = height / rows;
