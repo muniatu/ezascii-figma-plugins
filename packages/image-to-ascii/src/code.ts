@@ -79,9 +79,17 @@ function positionNextToSelection(node: SceneNode) {
 figma.ui.onmessage = async (msg: Msg) => {
   try {
     if (msg.type === 'insert-text') {
-      await figma.loadFontAsync({ family: 'Courier New', style: 'Regular' });
+      // Bold weight matches the PNG output and stays visible against most
+      // Figma backgrounds. Fall back to Regular if Bold isn't installed.
+      let style: 'Bold' | 'Regular' = 'Bold';
+      try {
+        await figma.loadFontAsync({ family: 'Courier New', style: 'Bold' });
+      } catch {
+        style = 'Regular';
+        await figma.loadFontAsync({ family: 'Courier New', style: 'Regular' });
+      }
       const node = figma.createText();
-      node.fontName = { family: 'Courier New', style: 'Regular' };
+      node.fontName = { family: 'Courier New', style };
       node.fontSize = 10;
       node.characters = msg.lines.join('\n');
       positionNextToSelection(node);

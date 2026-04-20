@@ -43,6 +43,11 @@ function paintAsciiCanvas(
   // disappears against most Figma backgrounds.
   ctx.font = `bold ${blockSize}px "Courier New", monospace`;
   ctx.textBaseline = 'top';
+  // Stroke pass thickens each glyph by the lineWidth below. Scales with
+  // blockSize so small previews don't get mushy and big ones stay readable.
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  const strokeWidth = Math.max(1, blockSize / 10);
 
   const sampleW = src ? src.width / grid.cols : 0;
   const sampleH = src ? src.height / grid.rows : 0;
@@ -71,11 +76,18 @@ function paintAsciiCanvas(
           }
         }
         if (n === 0) continue;
-        ctx.fillStyle = `rgb(${Math.floor(tr / n)},${Math.floor(tg / n)},${Math.floor(tb / n)})`;
+        const style = `rgb(${Math.floor(tr / n)},${Math.floor(tg / n)},${Math.floor(tb / n)})`;
+        ctx.fillStyle = style;
+        ctx.strokeStyle = style;
       } else {
         ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#fff';
       }
 
+      // Stroke first, then fill on top — gives each glyph a same-color halo
+      // that visibly thickens the character without adding a different hue.
+      ctx.lineWidth = strokeWidth;
+      ctx.strokeText(ch, c * blockSize, r * blockSize);
       ctx.fillText(ch, c * blockSize, r * blockSize);
     }
   }
