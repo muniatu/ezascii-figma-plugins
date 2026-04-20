@@ -35,8 +35,10 @@ function paintAsciiCanvas(
   blockSize: number,
   color: 'mono' | 'sampled',
 ): void {
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, grid.cols * blockSize, grid.rows * blockSize);
+  // Start from a transparent canvas — the exported PNG keeps alpha so the
+  // pasted Figma rectangle has no background. For the preview pane visibility
+  // we rely on a CSS background on the canvas element instead.
+  ctx.clearRect(0, 0, grid.cols * blockSize, grid.rows * blockSize);
   ctx.font = `${blockSize}px "Courier New", monospace`;
   ctx.textBaseline = 'top';
 
