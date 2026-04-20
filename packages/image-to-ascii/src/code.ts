@@ -1,15 +1,14 @@
 figma.showUI(__html__, { width: 960, height: 540, title: 'Image to ASCII Art' });
 
-type InsertTextMsg = { type: 'insert-text'; lines: string[] };
-type InsertImageMsg = {
-  type: 'insert-image';
-  bytes: Uint8Array;
-  width: number;
-  height: number;
-};
-type Msg = InsertTextMsg | InsertImageMsg;
+type ColorRange = { start: number; end: number; hex: string };
 
-// Nodes we can export as a PNG for the ASCII preview.
+type InsertMsg = {
+  type: 'insert-text';
+  text: string;
+  ranges?: ColorRange[];
+};
+
+// Nodes we can export as a PNG so the iframe can read their pixels.
 type ExportableNode =
   | FrameNode
   | RectangleNode
@@ -57,7 +56,6 @@ async function postSelection() {
   }
 }
 
-// Export the current selection on plugin start and whenever it changes.
 figma.on('selectionchange', () => {
   void postSelection();
 });
@@ -76,32 +74,38 @@ function positionNextToSelection(node: SceneNode) {
   figma.currentPage.appendChild(node);
 }
 
-figma.ui.onmessage = async (msg: Msg) => {
+function hexToSolidPaint(hex: string): SolidPaint {
+  // hex is always `#rrggbb` coming from the UI
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  return { type: 'SOLID', color: { r, g, b } };
+}
+
+figma.ui.onmessage = async (msg: InsertMsg) => {
+  if (msg.type !== 'insert-text') return;
+
   try {
-    if (msg.type === 'insert-text') {
-      await figma.loadFontAsync({ family: 'Courier New', style: 'Regular' });
-      const node = figma.createText();
-      node.fontName = { family: 'Courier New', style: 'Regular' };
-      node.fontSize = 10;
-      node.characters = msg.lines.join('\n');
-      positionNextToSelection(node);
-      figma.currentPage.selection = [node];
-      figma.viewport.scrollAndZoomIntoView([node]);
-      figma.notify('ASCII text inserted');
-      return;
+    await figma.loadFontAsync({ family: 'Courier New', style: 'Regular' });
+    const node = figma.createText();
+    node.fontName = { family: 'Courier New', style: 'Regular' };
+    node.fontSize = 10;
+    node.characters = msg.text;
+
+    if (msg.ranges && msg.ranges.length > 0) {
+      const len = node.characters.length;
+      for (const range of msg.ranges) {
+        const start = Math.max(0, Math.min(range.start, len));
+        const end = Math.max(0, Math.min(range.end, len));
+        if (start >= end) continue;
+        node.setRangeFills(start, end, [hexToSolidPaint(range.hex)]);
+      }
     }
 
-    if (msg.type === 'insert-image') {
-      const image = figma.createImage(msg.bytes);
-      const rect = figma.createRectangle();
-      rect.resize(msg.width, msg.height);
-      rect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash: image.hash }];
-      positionNextToSelection(rect);
-      figma.currentPage.selection = [rect];
-      figma.viewport.scrollAndZoomIntoView([rect]);
-      figma.notify('ASCII image inserted');
-      return;
-    }
+    positionNextToSelection(node);
+    figma.currentPage.selection = [node];
+    figma.viewport.scrollAndZoomIntoView([node]);
+    figma.notify('ASCII text inserted');
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     figma.notify(`Insert failed: ${message}`, { error: true });

@@ -23,60 +23,106 @@ window.addEventListener('error', (e) => showFatalError(e.error ?? e.message, 'ru
 window.addEventListener('unhandledrejection', (e) => showFatalError(e.reason, 'promise'));
 
 /**
- * Paint the ASCII grid onto a 2D context in the source's sampled colors.
- * Monochrome = white on black (matches what a Figma text layer looks like).
- * Color = each character uses the average RGB of its source block.
- * Shared between the canvas preview and the "Paste in Figma" image export.
+ * Sample the average RGB of the source-image block that corresponds to the
+ * given grid cell. Returns null if the cell has no pixels (shouldn't happen
+ * in practice unless grid dimensions don't match source).
  */
-function paintAsciiCanvas(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+function sampleBlockColor(
+  src: ImageData,
   grid: AsciiGrid,
-  src: ImageData | null,
-  blockSize: number,
-  color: 'mono' | 'sampled',
-): void {
-  // Start from a transparent canvas — the exported PNG keeps alpha so the
-  // pasted Figma rectangle has no background. For the preview pane visibility
-  // we rely on a CSS background on the canvas element instead.
-  ctx.clearRect(0, 0, grid.cols * blockSize, grid.rows * blockSize);
-  ctx.font = `${blockSize}px "Courier New", monospace`;
-  ctx.textBaseline = 'top';
+  row: number,
+  col: number,
+): { r: number; g: number; b: number } | null {
+  const sampleW = src.width / grid.cols;
+  const sampleH = src.height / grid.rows;
+  const startX = Math.floor(col * sampleW);
+  const startY = Math.floor(row * sampleH);
+  const endX = Math.min(Math.floor((col + 1) * sampleW), src.width);
+  const endY = Math.min(Math.floor((row + 1) * sampleH), src.height);
+  let tr = 0;
+  let tg = 0;
+  let tb = 0;
+  let n = 0;
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      const i = (y * src.width + x) * 4;
+      tr += src.data[i];
+      tg += src.data[i + 1];
+      tb += src.data[i + 2];
+      n++;
+    }
+  }
+  if (n === 0) return null;
+  return { r: Math.floor(tr / n), g: Math.floor(tg / n), b: Math.floor(tb / n) };
+}
 
-  const sampleW = src ? src.width / grid.cols : 0;
-  const sampleH = src ? src.height / grid.rows : 0;
+function toHex(v: number): string {
+  return v.toString(16).padStart(2, '0');
+}
+
+/**
+ * Build groups of consecutive characters sharing the same color (for
+ * compactly applying range fills in the Figma sandbox). `hex` is null for
+ * whitespace/empty ranges where we don't apply a fill.
+ */
+interface ColorRange {
+  start: number;
+  end: number;
+  hex: string;
+}
+
+function buildColorRanges(
+  grid: AsciiGrid,
+  src: ImageData,
+): { text: string; ranges: ColorRange[] } {
+  let text = '';
+  const ranges: ColorRange[] = [];
+  let runStart = -1;
+  let runHex = '';
+
+  const flush = (end: number) => {
+    if (runStart >= 0 && runHex) {
+      ranges.push({ start: runStart, end, hex: runHex });
+    }
+    runStart = -1;
+    runHex = '';
+  };
 
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       const ch = grid.lines[r][c] ?? ' ';
-      if (ch === ' ') continue;
+      const charIdx = text.length;
+      text += ch;
 
-      if (color === 'sampled' && src) {
-        const startX = Math.floor(c * sampleW);
-        const startY = Math.floor(r * sampleH);
-        const endX = Math.min(Math.floor((c + 1) * sampleW), src.width);
-        const endY = Math.min(Math.floor((r + 1) * sampleH), src.height);
-        let tr = 0;
-        let tg = 0;
-        let tb = 0;
-        let n = 0;
-        for (let y = startY; y < endY; y++) {
-          for (let x = startX; x < endX; x++) {
-            const i = (y * src.width + x) * 4;
-            tr += src.data[i];
-            tg += src.data[i + 1];
-            tb += src.data[i + 2];
-            n++;
-          }
-        }
-        if (n === 0) continue;
-        ctx.fillStyle = `rgb(${Math.floor(tr / n)},${Math.floor(tg / n)},${Math.floor(tb / n)})`;
-      } else {
-        ctx.fillStyle = '#fff';
+      if (ch === ' ') {
+        flush(charIdx);
+        continue;
       }
 
-      ctx.fillText(ch, c * blockSize, r * blockSize);
+      const color = sampleBlockColor(src, grid, r, c);
+      if (!color) {
+        flush(charIdx);
+        continue;
+      }
+
+      const hex = `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
+      if (hex === runHex) {
+        // extend the current run
+        continue;
+      }
+      flush(charIdx);
+      runStart = charIdx;
+      runHex = hex;
     }
+    // newline break — flush any open run, then append \n
+    flush(text.length);
+    text += '\n';
   }
+  flush(text.length);
+  // Drop the trailing newline the loop leaves behind
+  if (text.endsWith('\n')) text = text.slice(0, -1);
+
+  return { text, ranges };
 }
 
 try {
@@ -84,16 +130,19 @@ try {
   const blockSizeEl = document.getElementById('blockSize') as HTMLInputElement;
   const blockSizeValEl = document.getElementById('blockSizeVal') as HTMLSpanElement;
   const charsetEl = document.getElementById('charset') as HTMLSelectElement;
-  const outputEl = document.getElementById('output') as HTMLSelectElement;
+  const colorEl = document.getElementById('color') as HTMLInputElement;
   const invertEl = document.getElementById('invert') as HTMLInputElement;
   const previewEl = document.getElementById('preview') as HTMLPreElement;
-  const previewCanvasEl = document.getElementById('preview-canvas') as HTMLCanvasElement;
   const emptyEl = document.getElementById('preview-empty') as HTMLDivElement;
   const convertEl = document.getElementById('convert') as HTMLButtonElement;
   const upgradeEl = document.getElementById('upgrade') as HTMLButtonElement;
   const bmcSlot = document.getElementById('bmc-slot') as HTMLDivElement;
 
   let currentImageData: ImageData | null = null;
+
+  // Courier New in Figma: char cell ≈ 0.6 × fontSize wide, ~1.0 tall.
+  // Correcting row count preserves source aspect in the rendered text layer.
+  const MONO_CHAR_ASPECT = 0.6;
 
   async function decodeToImageData(bytes: Uint8Array): Promise<ImageData> {
     const copy = new Uint8Array(bytes);
@@ -110,42 +159,44 @@ try {
     emptyEl.textContent = msg;
     emptyEl.style.display = 'block';
     previewEl.style.display = 'none';
-    previewCanvasEl.style.display = 'none';
     convertEl.disabled = true;
   }
 
-  // Courier New character cell is ~0.5× as wide as it is tall.
-  // Used when the output will be displayed with a real monospace text renderer.
-  const MONO_CHAR_ASPECT = 0.5;
+  function buildGrid(src: ImageData): AsciiGrid {
+    return renderAsciiTextGrid(src, {
+      charset: getCharset(charsetEl.value as CharsetKey),
+      blockSize: parseInt(blockSizeEl.value, 10),
+      invert: invertEl.checked,
+      charAspectRatio: MONO_CHAR_ASPECT,
+    });
+  }
 
   function refreshPreview() {
     if (!currentImageData) return;
-    const blockSize = parseInt(blockSizeEl.value, 10);
-    const mode = outputEl.value as 'text' | 'image';
-    // Text mode will render into a Figma TextNode (Courier New) so we reduce
-    // row count to compensate. Image mode paints into a canvas where each
-    // character cell is a square block of pixels — no correction needed.
-    const grid = renderAsciiTextGrid(currentImageData, {
-      charset: getCharset(charsetEl.value as CharsetKey),
-      blockSize,
-      invert: invertEl.checked,
-      charAspectRatio: mode === 'text' ? MONO_CHAR_ASPECT : 1.0,
-    });
-
+    const grid = buildGrid(currentImageData);
     emptyEl.style.display = 'none';
+    previewEl.style.display = '';
+    previewEl.innerHTML = '';
 
-    if (mode === 'text') {
-      previewEl.textContent = grid.lines.join('\n');
-      previewEl.style.display = '';
-      previewCanvasEl.style.display = 'none';
+    if (colorEl.checked) {
+      // Colored preview: one <span> per colored run.
+      const { text, ranges } = buildColorRanges(grid, currentImageData);
+      let cursor = 0;
+      for (const range of ranges) {
+        if (range.start > cursor) {
+          previewEl.appendChild(document.createTextNode(text.slice(cursor, range.start)));
+        }
+        const span = document.createElement('span');
+        span.style.color = range.hex;
+        span.textContent = text.slice(range.start, range.end);
+        previewEl.appendChild(span);
+        cursor = range.end;
+      }
+      if (cursor < text.length) {
+        previewEl.appendChild(document.createTextNode(text.slice(cursor)));
+      }
     } else {
-      // Color canvas preview — matches what Paste in Figma will output.
-      previewCanvasEl.width = grid.cols * blockSize;
-      previewCanvasEl.height = grid.rows * blockSize;
-      const ctx = previewCanvasEl.getContext('2d');
-      if (ctx) paintAsciiCanvas(ctx, grid, currentImageData, blockSize, 'sampled');
-      previewCanvasEl.style.display = '';
-      previewEl.style.display = 'none';
+      previewEl.textContent = grid.lines.join('\n');
     }
 
     convertEl.disabled = false;
@@ -162,48 +213,25 @@ try {
     schedulePreview();
   });
   charsetEl.addEventListener('change', refreshPreview);
-  outputEl.addEventListener('change', refreshPreview);
+  colorEl.addEventListener('change', refreshPreview);
   invertEl.addEventListener('change', refreshPreview);
 
-  convertEl.addEventListener('click', async () => {
+  convertEl.addEventListener('click', () => {
     if (!currentImageData) return;
     try {
-      const outputType = outputEl.value as 'text' | 'image';
-      const blockSize = parseInt(blockSizeEl.value, 10);
-      const grid = renderAsciiTextGrid(currentImageData, {
-        charset: getCharset(charsetEl.value as CharsetKey),
-        blockSize,
-        invert: invertEl.checked,
-        // Match what the preview shows: correct aspect for text, square cells for canvas.
-        charAspectRatio: outputType === 'text' ? MONO_CHAR_ASPECT : 1.0,
-      });
-
-      if (outputType === 'text') {
+      const grid = buildGrid(currentImageData);
+      if (colorEl.checked) {
+        const { text, ranges } = buildColorRanges(grid, currentImageData);
         parent.postMessage(
-          { pluginMessage: { type: 'insert-text', lines: grid.lines } },
+          { pluginMessage: { type: 'insert-text', text, ranges } },
           '*',
         );
-        return;
+      } else {
+        parent.postMessage(
+          { pluginMessage: { type: 'insert-text', text: grid.lines.join('\n') } },
+          '*',
+        );
       }
-
-      // Rendered image = sampled color, same paint function as preview.
-      const canvas = new OffscreenCanvas(grid.cols * blockSize, grid.rows * blockSize);
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Could not get 2D context');
-      paintAsciiCanvas(ctx, grid, currentImageData, blockSize, 'sampled');
-      const blob = await canvas.convertToBlob({ type: 'image/png' });
-      const outBytes = new Uint8Array(await blob.arrayBuffer());
-      parent.postMessage(
-        {
-          pluginMessage: {
-            type: 'insert-image',
-            bytes: outBytes,
-            width: canvas.width,
-            height: canvas.height,
-          },
-        },
-        '*',
-      );
     } catch (err) {
       showFatalError(err, 'convert');
     }
@@ -215,7 +243,6 @@ try {
 
   if (bmcSlot) mountBmcLink(bmcSlot);
 
-  // Listen for image bytes coming from the sandbox
   window.addEventListener('message', async (e) => {
     const msg = (e.data as { pluginMessage?: unknown })?.pluginMessage;
     if (!msg || typeof msg !== 'object') return;
