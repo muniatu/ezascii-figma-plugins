@@ -39,7 +39,9 @@ function paintAsciiCanvas(
   // pasted Figma rectangle has no background. For the preview pane visibility
   // we rely on a CSS background on the canvas element instead.
   ctx.clearRect(0, 0, grid.cols * blockSize, grid.rows * blockSize);
-  ctx.font = `${blockSize}px "Courier New", monospace`;
+  // Bold weight — regular Courier New is too thin at small block sizes and
+  // disappears against most Figma backgrounds.
+  ctx.font = `bold ${blockSize}px "Courier New", monospace`;
   ctx.textBaseline = 'top';
 
   const sampleW = src ? src.width / grid.cols : 0;
