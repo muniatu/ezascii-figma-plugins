@@ -23,109 +23,60 @@ window.addEventListener('error', (e) => showFatalError(e.error ?? e.message, 'ru
 window.addEventListener('unhandledrejection', (e) => showFatalError(e.reason, 'promise'));
 
 /**
- * Sample the average RGB of the source-image block that corresponds to the
- * given grid cell. Returns null if the cell has no pixels (shouldn't happen
- * in practice unless grid dimensions don't match source).
+ * Paint the ASCII grid onto a 2D context in the source's sampled colors.
+ * Monochrome = white on black (matches what a Figma text layer looks like).
+ * Color = each character uses the average RGB of its source block.
+ * Shared between the canvas preview and the "Paste in Figma" image export.
  */
-function sampleBlockColor(
-  src: ImageData,
+function paintAsciiCanvas(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   grid: AsciiGrid,
-  row: number,
-  col: number,
-): { r: number; g: number; b: number } | null {
-  const sampleW = src.width / grid.cols;
-  const sampleH = src.height / grid.rows;
-  const startX = Math.floor(col * sampleW);
-  const startY = Math.floor(row * sampleH);
-  const endX = Math.min(Math.floor((col + 1) * sampleW), src.width);
-  const endY = Math.min(Math.floor((row + 1) * sampleH), src.height);
-  let tr = 0;
-  let tg = 0;
-  let tb = 0;
-  let n = 0;
-  for (let y = startY; y < endY; y++) {
-    for (let x = startX; x < endX; x++) {
-      const i = (y * src.width + x) * 4;
-      tr += src.data[i];
-      tg += src.data[i + 1];
-      tb += src.data[i + 2];
-      n++;
-    }
-  }
-  if (n === 0) return null;
-  return { r: Math.floor(tr / n), g: Math.floor(tg / n), b: Math.floor(tb / n) };
-}
+  src: ImageData | null,
+  blockSize: number,
+  color: 'mono' | 'sampled',
+): void {
+  // Start from a transparent canvas — the exported PNG keeps alpha so the
+  // pasted Figma rectangle has no background. For the preview pane visibility
+  // we rely on a CSS background on the canvas element instead.
+  ctx.clearRect(0, 0, grid.cols * blockSize, grid.rows * blockSize);
+  ctx.font = `${blockSize}px "Courier New", monospace`;
+  ctx.textBaseline = 'top';
 
-function toHex(v: number): string {
-  return v.toString(16).padStart(2, '0');
-}
-
-/**
- * Snap RGB to 4-bit-per-channel resolution (16 steps per channel, 4096 colors).
- * Coarser than the preview but the layered-nodes strategy keeps cost tied to
- * *distinct* colors, not characters — typical images quantize down to 30-80
- * unique colors at this precision, well inside a snappy insert budget.
- */
-function quantize(v: number): number {
-  return v & 0xf0;
-}
-
-/**
- * Fast color strategy: split the ASCII into one "layer" per unique color.
- * Each layer is the same grid, but only the cells matching that color keep
- * their character — the rest are spaces. In Figma we create one TextNode
- * per layer (all stacked at the same origin inside a group). Each node
- * has a single fill — no setRangeFills needed, so cost scales with number
- * of distinct colors, not number of characters. Much faster.
- */
-interface ColorLayer {
-  hex: string;
-  text: string;
-}
-
-function buildColorLayers(
-  grid: AsciiGrid,
-  src: ImageData,
-): { fullText: string; layers: ColorLayer[] } {
-  const fullText = grid.lines.map((l) => l.padEnd(grid.cols, ' ')).join('\n');
-
-  // Per-color 2D array of chars, initialized lazily. Rows are kept at
-  // grid.cols length so the layer preserves the same grid bounding box.
-  const layerMap = new Map<string, string[][]>();
-
-  const getLayer = (hex: string): string[][] => {
-    let layer = layerMap.get(hex);
-    if (!layer) {
-      layer = [];
-      for (let i = 0; i < grid.rows; i++) {
-        layer.push(Array.from({ length: grid.cols }, () => ' '));
-      }
-      layerMap.set(hex, layer);
-    }
-    return layer;
-  };
+  const sampleW = src ? src.width / grid.cols : 0;
+  const sampleH = src ? src.height / grid.rows : 0;
 
   for (let r = 0; r < grid.rows; r++) {
-    const line = grid.lines[r] ?? '';
     for (let c = 0; c < grid.cols; c++) {
-      const ch = line[c] ?? ' ';
+      const ch = grid.lines[r][c] ?? ' ';
       if (ch === ' ') continue;
 
-      const color = sampleBlockColor(src, grid, r, c);
-      if (!color) continue;
+      if (color === 'sampled' && src) {
+        const startX = Math.floor(c * sampleW);
+        const startY = Math.floor(r * sampleH);
+        const endX = Math.min(Math.floor((c + 1) * sampleW), src.width);
+        const endY = Math.min(Math.floor((r + 1) * sampleH), src.height);
+        let tr = 0;
+        let tg = 0;
+        let tb = 0;
+        let n = 0;
+        for (let y = startY; y < endY; y++) {
+          for (let x = startX; x < endX; x++) {
+            const i = (y * src.width + x) * 4;
+            tr += src.data[i];
+            tg += src.data[i + 1];
+            tb += src.data[i + 2];
+            n++;
+          }
+        }
+        if (n === 0) continue;
+        ctx.fillStyle = `rgb(${Math.floor(tr / n)},${Math.floor(tg / n)},${Math.floor(tb / n)})`;
+      } else {
+        ctx.fillStyle = '#fff';
+      }
 
-      const hex = `#${toHex(quantize(color.r))}${toHex(quantize(color.g))}${toHex(quantize(color.b))}`;
-      const layer = getLayer(hex);
-      layer[r][c] = ch;
+      ctx.fillText(ch, c * blockSize, r * blockSize);
     }
   }
-
-  const layers: ColorLayer[] = Array.from(layerMap.entries()).map(([hex, rows]) => ({
-    hex,
-    text: rows.map((r) => r.join('')).join('\n'),
-  }));
-
-  return { fullText, layers };
 }
 
 try {
@@ -133,19 +84,16 @@ try {
   const blockSizeEl = document.getElementById('blockSize') as HTMLInputElement;
   const blockSizeValEl = document.getElementById('blockSizeVal') as HTMLSpanElement;
   const charsetEl = document.getElementById('charset') as HTMLSelectElement;
-  const colorEl = document.getElementById('color') as HTMLInputElement;
+  const outputEl = document.getElementById('output') as HTMLSelectElement;
   const invertEl = document.getElementById('invert') as HTMLInputElement;
   const previewEl = document.getElementById('preview') as HTMLPreElement;
+  const previewCanvasEl = document.getElementById('preview-canvas') as HTMLCanvasElement;
   const emptyEl = document.getElementById('preview-empty') as HTMLDivElement;
   const convertEl = document.getElementById('convert') as HTMLButtonElement;
   const upgradeEl = document.getElementById('upgrade') as HTMLButtonElement;
   const bmcSlot = document.getElementById('bmc-slot') as HTMLDivElement;
 
   let currentImageData: ImageData | null = null;
-
-  // Courier New in Figma: char cell ≈ 0.6 × fontSize wide, ~1.0 tall.
-  // Correcting row count preserves source aspect in the rendered text layer.
-  const MONO_CHAR_ASPECT = 0.6;
 
   async function decodeToImageData(bytes: Uint8Array): Promise<ImageData> {
     const copy = new Uint8Array(bytes);
@@ -162,73 +110,43 @@ try {
     emptyEl.textContent = msg;
     emptyEl.style.display = 'block';
     previewEl.style.display = 'none';
+    previewCanvasEl.style.display = 'none';
     convertEl.disabled = true;
   }
 
-  function buildGrid(src: ImageData): AsciiGrid {
-    return renderAsciiTextGrid(src, {
-      charset: getCharset(charsetEl.value as CharsetKey),
-      blockSize: parseInt(blockSizeEl.value, 10),
-      invert: invertEl.checked,
-      charAspectRatio: MONO_CHAR_ASPECT,
-    });
-  }
-
-  function buildColoredSpans(src: ImageData, grid: AsciiGrid): DocumentFragment {
-    // Per-row build of <span> elements — changing color midline creates a
-    // new span, same-color neighbors stay in one span. Purely a preview
-    // optimization; the inserted Figma output uses the layer strategy instead.
-    const frag = document.createDocumentFragment();
-    let currentHex = '';
-    let currentSpan: HTMLSpanElement | null = null;
-
-    const flushSpan = () => {
-      if (currentSpan) frag.appendChild(currentSpan);
-      currentSpan = null;
-      currentHex = '';
-    };
-
-    for (let r = 0; r < grid.rows; r++) {
-      const line = grid.lines[r] ?? '';
-      for (let c = 0; c < grid.cols; c++) {
-        const ch = line[c] ?? ' ';
-        if (ch === ' ') {
-          flushSpan();
-          frag.appendChild(document.createTextNode(' '));
-          continue;
-        }
-        const color = sampleBlockColor(src, grid, r, c);
-        if (!color) {
-          flushSpan();
-          frag.appendChild(document.createTextNode(ch));
-          continue;
-        }
-        const hex = `#${toHex(quantize(color.r))}${toHex(quantize(color.g))}${toHex(quantize(color.b))}`;
-        if (hex !== currentHex) {
-          flushSpan();
-          currentSpan = document.createElement('span');
-          currentSpan.style.color = hex;
-          currentHex = hex;
-        }
-        currentSpan!.appendChild(document.createTextNode(ch));
-      }
-      flushSpan();
-      if (r < grid.rows - 1) frag.appendChild(document.createTextNode('\n'));
-    }
-    return frag;
-  }
+  // Courier New character cell in Figma: width ≈ 0.6 × fontSize, with default
+  // line-height giving a ~0.6 width/height ratio. Use this to size the grid so
+  // a square input renders as a square output.
+  const MONO_CHAR_ASPECT = 0.6;
 
   function refreshPreview() {
     if (!currentImageData) return;
-    const grid = buildGrid(currentImageData);
-    emptyEl.style.display = 'none';
-    previewEl.style.display = '';
-    previewEl.innerHTML = '';
+    const blockSize = parseInt(blockSizeEl.value, 10);
+    const mode = outputEl.value as 'text' | 'image';
+    // Text mode will render into a Figma TextNode (Courier New) so we reduce
+    // row count to compensate. Image mode paints into a canvas where each
+    // character cell is a square block of pixels — no correction needed.
+    const grid = renderAsciiTextGrid(currentImageData, {
+      charset: getCharset(charsetEl.value as CharsetKey),
+      blockSize,
+      invert: invertEl.checked,
+      charAspectRatio: mode === 'text' ? MONO_CHAR_ASPECT : 1.0,
+    });
 
-    if (colorEl.checked) {
-      previewEl.appendChild(buildColoredSpans(currentImageData, grid));
-    } else {
+    emptyEl.style.display = 'none';
+
+    if (mode === 'text') {
       previewEl.textContent = grid.lines.join('\n');
+      previewEl.style.display = '';
+      previewCanvasEl.style.display = 'none';
+    } else {
+      // Color canvas preview — matches what Paste in Figma will output.
+      previewCanvasEl.width = grid.cols * blockSize;
+      previewCanvasEl.height = grid.rows * blockSize;
+      const ctx = previewCanvasEl.getContext('2d');
+      if (ctx) paintAsciiCanvas(ctx, grid, currentImageData, blockSize, 'sampled');
+      previewCanvasEl.style.display = '';
+      previewEl.style.display = 'none';
     }
 
     convertEl.disabled = false;
@@ -245,49 +163,49 @@ try {
     schedulePreview();
   });
   charsetEl.addEventListener('change', refreshPreview);
-  colorEl.addEventListener('change', refreshPreview);
+  outputEl.addEventListener('change', refreshPreview);
   invertEl.addEventListener('change', refreshPreview);
 
-  // Cap on layer count as a safety net — with 4-bit quant this caps at
-  // ~80 layers on real-world images, but very noisy photos could exceed.
-  const MAX_COLOR_LAYERS = 200;
-
-  const DEFAULT_CONVERT_LABEL = convertEl.textContent ?? 'Paste in Figma';
-
-  function setConverting(active: boolean) {
-    convertEl.disabled = active;
-    convertEl.textContent = active ? 'Converting…' : DEFAULT_CONVERT_LABEL;
-  }
-
-  convertEl.addEventListener('click', () => {
+  convertEl.addEventListener('click', async () => {
     if (!currentImageData) return;
     try {
-      const grid = buildGrid(currentImageData);
-      setConverting(true);
+      const outputType = outputEl.value as 'text' | 'image';
+      const blockSize = parseInt(blockSizeEl.value, 10);
+      const grid = renderAsciiTextGrid(currentImageData, {
+        charset: getCharset(charsetEl.value as CharsetKey),
+        blockSize,
+        invert: invertEl.checked,
+        // Match what the preview shows: correct aspect for text, square cells for canvas.
+        charAspectRatio: outputType === 'text' ? MONO_CHAR_ASPECT : 1.0,
+      });
 
-      if (colorEl.checked) {
-        const { fullText, layers } = buildColorLayers(grid, currentImageData);
-        const safeLayers = layers.slice(0, MAX_COLOR_LAYERS);
-        if (layers.length > MAX_COLOR_LAYERS) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[ezascii-image] color layers capped at ${MAX_COLOR_LAYERS} (had ${layers.length}).`,
-          );
-        }
+      if (outputType === 'text') {
         parent.postMessage(
-          {
-            pluginMessage: { type: 'insert-layered', fullText, layers: safeLayers },
-          },
+          { pluginMessage: { type: 'insert-text', lines: grid.lines } },
           '*',
         );
-      } else {
-        parent.postMessage(
-          { pluginMessage: { type: 'insert-text', text: grid.lines.join('\n') } },
-          '*',
-        );
+        return;
       }
+
+      // Rendered image = sampled color, same paint function as preview.
+      const canvas = new OffscreenCanvas(grid.cols * blockSize, grid.rows * blockSize);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not get 2D context');
+      paintAsciiCanvas(ctx, grid, currentImageData, blockSize, 'sampled');
+      const blob = await canvas.convertToBlob({ type: 'image/png' });
+      const outBytes = new Uint8Array(await blob.arrayBuffer());
+      parent.postMessage(
+        {
+          pluginMessage: {
+            type: 'insert-image',
+            bytes: outBytes,
+            width: canvas.width,
+            height: canvas.height,
+          },
+        },
+        '*',
+      );
     } catch (err) {
-      setConverting(false);
       showFatalError(err, 'convert');
     }
   });
@@ -298,6 +216,7 @@ try {
 
   if (bmcSlot) mountBmcLink(bmcSlot);
 
+  // Listen for image bytes coming from the sandbox
   window.addEventListener('message', async (e) => {
     const msg = (e.data as { pluginMessage?: unknown })?.pluginMessage;
     if (!msg || typeof msg !== 'object') return;
@@ -321,8 +240,6 @@ try {
       statusEl.classList.remove('active');
       statusEl.textContent = 'Select an image or frame in Figma';
       setEmpty('Select an image or frame in Figma to preview its ASCII version here.');
-    } else if (m.type === 'insert-done') {
-      setConverting(false);
     }
   });
 

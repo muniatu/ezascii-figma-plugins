@@ -1,16 +1,15 @@
 figma.showUI(__html__, { width: 960, height: 540, title: 'Image to ASCII Art' });
 
-type ColorLayer = { hex: string; text: string };
-
-type InsertTextMsg = { type: 'insert-text'; text: string };
-type InsertLayeredMsg = {
-  type: 'insert-layered';
-  fullText: string;
-  layers: ColorLayer[];
+type InsertTextMsg = { type: 'insert-text'; lines: string[] };
+type InsertImageMsg = {
+  type: 'insert-image';
+  bytes: Uint8Array;
+  width: number;
+  height: number;
 };
-type InsertMsg = InsertTextMsg | InsertLayeredMsg;
+type Msg = InsertTextMsg | InsertImageMsg;
 
-// Nodes we can export as a PNG so the iframe can read their pixels.
+// Nodes we can export as a PNG for the ASCII preview.
 type ExportableNode =
   | FrameNode
   | RectangleNode
@@ -58,6 +57,7 @@ async function postSelection() {
   }
 }
 
+// Export the current selection on plugin start and whenever it changes.
 figma.on('selectionchange', () => {
   void postSelection();
 });
@@ -76,76 +76,34 @@ function positionNextToSelection(node: SceneNode) {
   figma.currentPage.appendChild(node);
 }
 
-function hexToSolidPaint(hex: string): SolidPaint {
-  // hex is always `#rrggbb` coming from the UI
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
-  return { type: 'SOLID', color: { r, g, b } };
-}
-
-function makeTextNode(text: string, hex?: string): TextNode {
-  const node = figma.createText();
-  node.fontName = { family: 'Courier New', style: 'Regular' };
-  node.fontSize = 10;
-  node.characters = text;
-  if (hex) node.fills = [hexToSolidPaint(hex)];
-  return node;
-}
-
-figma.ui.onmessage = async (msg: InsertMsg) => {
+figma.ui.onmessage = async (msg: Msg) => {
   try {
-    await figma.loadFontAsync({ family: 'Courier New', style: 'Regular' });
-
     if (msg.type === 'insert-text') {
-      const node = makeTextNode(msg.text);
+      await figma.loadFontAsync({ family: 'Courier New', style: 'Regular' });
+      const node = figma.createText();
+      node.fontName = { family: 'Courier New', style: 'Regular' };
+      node.fontSize = 10;
+      node.characters = msg.lines.join('\n');
       positionNextToSelection(node);
       figma.currentPage.selection = [node];
       figma.viewport.scrollAndZoomIntoView([node]);
       figma.notify('ASCII text inserted');
-      figma.ui.postMessage({ type: 'insert-done' });
       return;
     }
 
-    if (msg.type === 'insert-layered') {
-      // Build one TextNode per color. Stack them at the same origin inside
-      // a group so the composite renders identically to the preview. Each
-      // node has exactly one fill — no setRangeFills. Cost scales with
-      // unique colors (tens), not characters (thousands).
-      const { fullText, layers } = msg;
-
-      // Anchor node: same character positions as every layer, default fill.
-      // Gives the group a consistent bounding box and fills cells that
-      // don't belong to any quantized color.
-      const anchor = makeTextNode(fullText);
-      positionNextToSelection(anchor);
-
-      const nodes: TextNode[] = [anchor];
-      const { x: ax, y: ay } = anchor;
-
-      for (const layer of layers) {
-        const node = makeTextNode(layer.text, layer.hex);
-        node.x = ax;
-        node.y = ay;
-        figma.currentPage.appendChild(node);
-        nodes.push(node);
-      }
-
-      // Group everything so the stack moves as one. User can ungroup to
-      // edit individual color layers (or change the font across all of
-      // them with a single cross-layer selection).
-      const group = figma.group(nodes, figma.currentPage);
-      group.name = 'ASCII art (color)';
-
-      figma.currentPage.selection = [group];
-      figma.viewport.scrollAndZoomIntoView([group]);
-      figma.notify(`ASCII art inserted · ${layers.length} color layers`);
-      figma.ui.postMessage({ type: 'insert-done' });
+    if (msg.type === 'insert-image') {
+      const image = figma.createImage(msg.bytes);
+      const rect = figma.createRectangle();
+      rect.resize(msg.width, msg.height);
+      rect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash: image.hash }];
+      positionNextToSelection(rect);
+      figma.currentPage.selection = [rect];
+      figma.viewport.scrollAndZoomIntoView([rect]);
+      figma.notify('ASCII image inserted');
       return;
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     figma.notify(`Insert failed: ${message}`, { error: true });
-    figma.ui.postMessage({ type: 'insert-done' });
   }
 };
