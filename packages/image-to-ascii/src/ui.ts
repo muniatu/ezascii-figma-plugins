@@ -61,13 +61,13 @@ function toHex(v: number): string {
 }
 
 /**
- * Snap RGB to 4-bit-per-channel resolution (16 steps per channel, 4096 colors).
- * Visually indistinguishable for character-level ASCII but collapses adjacent
- * similar-color cells into longer runs — huge reduction in range count, which
- * is what makes setRangeFills cheap enough to not crash the sandbox.
+ * Snap RGB to 3-bit-per-channel resolution (8 steps per channel, 512 colors).
+ * Character-scale rendering doesn't need more — and setRangeFills is the
+ * expensive operation, so collapsing similar-color runs is the single biggest
+ * performance lever available to us.
  */
 function quantize(v: number): number {
-  return v & 0xf0;
+  return v & 0xe0;
 }
 
 /**
@@ -233,19 +233,34 @@ try {
 
   // Hard cap on color ranges to protect the sandbox. In practice quantization
   // keeps us well under this, but very noisy images can still blow past it.
-  const MAX_COLOR_RANGES = 2000;
+  const MAX_COLOR_RANGES = 1500;
+
+  // Single-character color runs don't contribute much visually but double the
+  // setRangeFills count. Skip any run shorter than this — those cells keep
+  // the text's default (white/foreground) color.
+  const MIN_RUN_LENGTH = 2;
+
+  const DEFAULT_CONVERT_LABEL = convertEl.textContent ?? 'Paste in Figma';
+
+  function setConverting(active: boolean) {
+    convertEl.disabled = active;
+    convertEl.textContent = active ? 'Converting…' : DEFAULT_CONVERT_LABEL;
+  }
 
   convertEl.addEventListener('click', () => {
     if (!currentImageData) return;
     try {
       const grid = buildGrid(currentImageData);
+      setConverting(true);
+
       if (colorEl.checked) {
         const { text, ranges } = buildColorRanges(grid, currentImageData);
-        const safeRanges = ranges.slice(0, MAX_COLOR_RANGES);
-        if (ranges.length > MAX_COLOR_RANGES) {
+        const longRanges = ranges.filter((r) => r.end - r.start >= MIN_RUN_LENGTH);
+        const safeRanges = longRanges.slice(0, MAX_COLOR_RANGES);
+        if (longRanges.length > MAX_COLOR_RANGES) {
           // eslint-disable-next-line no-console
           console.warn(
-            `[ezascii-image] color ranges capped at ${MAX_COLOR_RANGES} (had ${ranges.length}) — try a bigger block size or turn off Color for this image.`,
+            `[ezascii-image] color ranges capped at ${MAX_COLOR_RANGES} (had ${longRanges.length}) — try a bigger block size or turn off Color.`,
           );
         }
         parent.postMessage(
@@ -259,6 +274,7 @@ try {
         );
       }
     } catch (err) {
+      setConverting(false);
       showFatalError(err, 'convert');
     }
   });
@@ -292,6 +308,8 @@ try {
       statusEl.classList.remove('active');
       statusEl.textContent = 'Select an image or frame in Figma';
       setEmpty('Select an image or frame in Figma to preview its ASCII version here.');
+    } else if (m.type === 'insert-done') {
+      setConverting(false);
     }
   });
 

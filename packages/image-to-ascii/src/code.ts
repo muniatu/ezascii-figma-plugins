@@ -114,8 +114,10 @@ figma.ui.onmessage = async (msg: InsertMsg) => {
     figma.currentPage.selection = [node];
     figma.viewport.scrollAndZoomIntoView([node]);
     figma.notify('ASCII text inserted');
+    figma.ui.postMessage({ type: 'insert-done' });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     figma.notify(`Insert failed: ${message}`, { error: true });
+    figma.ui.postMessage({ type: 'insert-done' });
   }
 };
