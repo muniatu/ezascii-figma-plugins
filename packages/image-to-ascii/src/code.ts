@@ -94,11 +94,19 @@ figma.ui.onmessage = async (msg: InsertMsg) => {
 
     if (msg.ranges && msg.ranges.length > 0) {
       const len = node.characters.length;
+      // Yield every N fill operations so Figma's UI thread stays responsive
+      // for large inputs. Without this, hundreds of setRangeFills calls back
+      // to back can lock the sandbox long enough for Figma to kill the plugin.
+      const YIELD_EVERY = 50;
+      let i = 0;
       for (const range of msg.ranges) {
         const start = Math.max(0, Math.min(range.start, len));
         const end = Math.max(0, Math.min(range.end, len));
         if (start >= end) continue;
         node.setRangeFills(start, end, [hexToSolidPaint(range.hex)]);
+        if (++i % YIELD_EVERY === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
       }
     }
 

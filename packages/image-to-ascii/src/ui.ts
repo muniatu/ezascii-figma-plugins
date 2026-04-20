@@ -61,6 +61,16 @@ function toHex(v: number): string {
 }
 
 /**
+ * Snap RGB to 4-bit-per-channel resolution (16 steps per channel, 4096 colors).
+ * Visually indistinguishable for character-level ASCII but collapses adjacent
+ * similar-color cells into longer runs — huge reduction in range count, which
+ * is what makes setRangeFills cheap enough to not crash the sandbox.
+ */
+function quantize(v: number): number {
+  return v & 0xf0;
+}
+
+/**
  * Build groups of consecutive characters sharing the same color (for
  * compactly applying range fills in the Figma sandbox). `hex` is null for
  * whitespace/empty ranges where we don't apply a fill.
@@ -105,7 +115,12 @@ function buildColorRanges(
         continue;
       }
 
-      const hex = `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
+      // Quantize before building the hex so similar-color neighbors merge
+      // into a single range — keeps setRangeFills count manageable.
+      const qr = quantize(color.r);
+      const qg = quantize(color.g);
+      const qb = quantize(color.b);
+      const hex = `#${toHex(qr)}${toHex(qg)}${toHex(qb)}`;
       if (hex === runHex) {
         // extend the current run
         continue;
@@ -216,14 +231,25 @@ try {
   colorEl.addEventListener('change', refreshPreview);
   invertEl.addEventListener('change', refreshPreview);
 
+  // Hard cap on color ranges to protect the sandbox. In practice quantization
+  // keeps us well under this, but very noisy images can still blow past it.
+  const MAX_COLOR_RANGES = 2000;
+
   convertEl.addEventListener('click', () => {
     if (!currentImageData) return;
     try {
       const grid = buildGrid(currentImageData);
       if (colorEl.checked) {
         const { text, ranges } = buildColorRanges(grid, currentImageData);
+        const safeRanges = ranges.slice(0, MAX_COLOR_RANGES);
+        if (ranges.length > MAX_COLOR_RANGES) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[ezascii-image] color ranges capped at ${MAX_COLOR_RANGES} (had ${ranges.length}) — try a bigger block size or turn off Color for this image.`,
+          );
+        }
         parent.postMessage(
-          { pluginMessage: { type: 'insert-text', text, ranges } },
+          { pluginMessage: { type: 'insert-text', text, ranges: safeRanges } },
           '*',
         );
       } else {
