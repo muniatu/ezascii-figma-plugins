@@ -61,83 +61,71 @@ function toHex(v: number): string {
 }
 
 /**
- * Snap RGB to 3-bit-per-channel resolution (8 steps per channel, 512 colors).
- * Character-scale rendering doesn't need more — and setRangeFills is the
- * expensive operation, so collapsing similar-color runs is the single biggest
- * performance lever available to us.
+ * Snap RGB to 4-bit-per-channel resolution (16 steps per channel, 4096 colors).
+ * Coarser than the preview but the layered-nodes strategy keeps cost tied to
+ * *distinct* colors, not characters — typical images quantize down to 30-80
+ * unique colors at this precision, well inside a snappy insert budget.
  */
 function quantize(v: number): number {
-  return v & 0xe0;
+  return v & 0xf0;
 }
 
 /**
- * Build groups of consecutive characters sharing the same color (for
- * compactly applying range fills in the Figma sandbox). `hex` is null for
- * whitespace/empty ranges where we don't apply a fill.
+ * Fast color strategy: split the ASCII into one "layer" per unique color.
+ * Each layer is the same grid, but only the cells matching that color keep
+ * their character — the rest are spaces. In Figma we create one TextNode
+ * per layer (all stacked at the same origin inside a group). Each node
+ * has a single fill — no setRangeFills needed, so cost scales with number
+ * of distinct colors, not number of characters. Much faster.
  */
-interface ColorRange {
-  start: number;
-  end: number;
+interface ColorLayer {
   hex: string;
+  text: string;
 }
 
-function buildColorRanges(
+function buildColorLayers(
   grid: AsciiGrid,
   src: ImageData,
-): { text: string; ranges: ColorRange[] } {
-  let text = '';
-  const ranges: ColorRange[] = [];
-  let runStart = -1;
-  let runHex = '';
+): { fullText: string; layers: ColorLayer[] } {
+  const fullText = grid.lines.map((l) => l.padEnd(grid.cols, ' ')).join('\n');
 
-  const flush = (end: number) => {
-    if (runStart >= 0 && runHex) {
-      ranges.push({ start: runStart, end, hex: runHex });
+  // Per-color 2D array of chars, initialized lazily. Rows are kept at
+  // grid.cols length so the layer preserves the same grid bounding box.
+  const layerMap = new Map<string, string[][]>();
+
+  const getLayer = (hex: string): string[][] => {
+    let layer = layerMap.get(hex);
+    if (!layer) {
+      layer = [];
+      for (let i = 0; i < grid.rows; i++) {
+        layer.push(Array.from({ length: grid.cols }, () => ' '));
+      }
+      layerMap.set(hex, layer);
     }
-    runStart = -1;
-    runHex = '';
+    return layer;
   };
 
   for (let r = 0; r < grid.rows; r++) {
+    const line = grid.lines[r] ?? '';
     for (let c = 0; c < grid.cols; c++) {
-      const ch = grid.lines[r][c] ?? ' ';
-      const charIdx = text.length;
-      text += ch;
-
-      if (ch === ' ') {
-        flush(charIdx);
-        continue;
-      }
+      const ch = line[c] ?? ' ';
+      if (ch === ' ') continue;
 
       const color = sampleBlockColor(src, grid, r, c);
-      if (!color) {
-        flush(charIdx);
-        continue;
-      }
+      if (!color) continue;
 
-      // Quantize before building the hex so similar-color neighbors merge
-      // into a single range — keeps setRangeFills count manageable.
-      const qr = quantize(color.r);
-      const qg = quantize(color.g);
-      const qb = quantize(color.b);
-      const hex = `#${toHex(qr)}${toHex(qg)}${toHex(qb)}`;
-      if (hex === runHex) {
-        // extend the current run
-        continue;
-      }
-      flush(charIdx);
-      runStart = charIdx;
-      runHex = hex;
+      const hex = `#${toHex(quantize(color.r))}${toHex(quantize(color.g))}${toHex(quantize(color.b))}`;
+      const layer = getLayer(hex);
+      layer[r][c] = ch;
     }
-    // newline break — flush any open run, then append \n
-    flush(text.length);
-    text += '\n';
   }
-  flush(text.length);
-  // Drop the trailing newline the loop leaves behind
-  if (text.endsWith('\n')) text = text.slice(0, -1);
 
-  return { text, ranges };
+  const layers: ColorLayer[] = Array.from(layerMap.entries()).map(([hex, rows]) => ({
+    hex,
+    text: rows.map((r) => r.join('')).join('\n'),
+  }));
+
+  return { fullText, layers };
 }
 
 try {
@@ -186,6 +174,50 @@ try {
     });
   }
 
+  function buildColoredSpans(src: ImageData, grid: AsciiGrid): DocumentFragment {
+    // Per-row build of <span> elements — changing color midline creates a
+    // new span, same-color neighbors stay in one span. Purely a preview
+    // optimization; the inserted Figma output uses the layer strategy instead.
+    const frag = document.createDocumentFragment();
+    let currentHex = '';
+    let currentSpan: HTMLSpanElement | null = null;
+
+    const flushSpan = () => {
+      if (currentSpan) frag.appendChild(currentSpan);
+      currentSpan = null;
+      currentHex = '';
+    };
+
+    for (let r = 0; r < grid.rows; r++) {
+      const line = grid.lines[r] ?? '';
+      for (let c = 0; c < grid.cols; c++) {
+        const ch = line[c] ?? ' ';
+        if (ch === ' ') {
+          flushSpan();
+          frag.appendChild(document.createTextNode(' '));
+          continue;
+        }
+        const color = sampleBlockColor(src, grid, r, c);
+        if (!color) {
+          flushSpan();
+          frag.appendChild(document.createTextNode(ch));
+          continue;
+        }
+        const hex = `#${toHex(quantize(color.r))}${toHex(quantize(color.g))}${toHex(quantize(color.b))}`;
+        if (hex !== currentHex) {
+          flushSpan();
+          currentSpan = document.createElement('span');
+          currentSpan.style.color = hex;
+          currentHex = hex;
+        }
+        currentSpan!.appendChild(document.createTextNode(ch));
+      }
+      flushSpan();
+      if (r < grid.rows - 1) frag.appendChild(document.createTextNode('\n'));
+    }
+    return frag;
+  }
+
   function refreshPreview() {
     if (!currentImageData) return;
     const grid = buildGrid(currentImageData);
@@ -194,22 +226,7 @@ try {
     previewEl.innerHTML = '';
 
     if (colorEl.checked) {
-      // Colored preview: one <span> per colored run.
-      const { text, ranges } = buildColorRanges(grid, currentImageData);
-      let cursor = 0;
-      for (const range of ranges) {
-        if (range.start > cursor) {
-          previewEl.appendChild(document.createTextNode(text.slice(cursor, range.start)));
-        }
-        const span = document.createElement('span');
-        span.style.color = range.hex;
-        span.textContent = text.slice(range.start, range.end);
-        previewEl.appendChild(span);
-        cursor = range.end;
-      }
-      if (cursor < text.length) {
-        previewEl.appendChild(document.createTextNode(text.slice(cursor)));
-      }
+      previewEl.appendChild(buildColoredSpans(currentImageData, grid));
     } else {
       previewEl.textContent = grid.lines.join('\n');
     }
@@ -231,14 +248,9 @@ try {
   colorEl.addEventListener('change', refreshPreview);
   invertEl.addEventListener('change', refreshPreview);
 
-  // Hard cap on color ranges to protect the sandbox. In practice quantization
-  // keeps us well under this, but very noisy images can still blow past it.
-  const MAX_COLOR_RANGES = 1500;
-
-  // Single-character color runs don't contribute much visually but double the
-  // setRangeFills count. Skip any run shorter than this — those cells keep
-  // the text's default (white/foreground) color.
-  const MIN_RUN_LENGTH = 2;
+  // Cap on layer count as a safety net — with 4-bit quant this caps at
+  // ~80 layers on real-world images, but very noisy photos could exceed.
+  const MAX_COLOR_LAYERS = 200;
 
   const DEFAULT_CONVERT_LABEL = convertEl.textContent ?? 'Paste in Figma';
 
@@ -254,17 +266,18 @@ try {
       setConverting(true);
 
       if (colorEl.checked) {
-        const { text, ranges } = buildColorRanges(grid, currentImageData);
-        const longRanges = ranges.filter((r) => r.end - r.start >= MIN_RUN_LENGTH);
-        const safeRanges = longRanges.slice(0, MAX_COLOR_RANGES);
-        if (longRanges.length > MAX_COLOR_RANGES) {
+        const { fullText, layers } = buildColorLayers(grid, currentImageData);
+        const safeLayers = layers.slice(0, MAX_COLOR_LAYERS);
+        if (layers.length > MAX_COLOR_LAYERS) {
           // eslint-disable-next-line no-console
           console.warn(
-            `[ezascii-image] color ranges capped at ${MAX_COLOR_RANGES} (had ${longRanges.length}) — try a bigger block size or turn off Color.`,
+            `[ezascii-image] color layers capped at ${MAX_COLOR_LAYERS} (had ${layers.length}).`,
           );
         }
         parent.postMessage(
-          { pluginMessage: { type: 'insert-text', text, ranges: safeRanges } },
+          {
+            pluginMessage: { type: 'insert-layered', fullText, layers: safeLayers },
+          },
           '*',
         );
       } else {

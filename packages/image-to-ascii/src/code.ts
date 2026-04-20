@@ -1,12 +1,14 @@
 figma.showUI(__html__, { width: 960, height: 540, title: 'Image to ASCII Art' });
 
-type ColorRange = { start: number; end: number; hex: string };
+type ColorLayer = { hex: string; text: string };
 
-type InsertMsg = {
-  type: 'insert-text';
-  text: string;
-  ranges?: ColorRange[];
+type InsertTextMsg = { type: 'insert-text'; text: string };
+type InsertLayeredMsg = {
+  type: 'insert-layered';
+  fullText: string;
+  layers: ColorLayer[];
 };
+type InsertMsg = InsertTextMsg | InsertLayeredMsg;
 
 // Nodes we can export as a PNG so the iframe can read their pixels.
 type ExportableNode =
@@ -82,39 +84,65 @@ function hexToSolidPaint(hex: string): SolidPaint {
   return { type: 'SOLID', color: { r, g, b } };
 }
 
-figma.ui.onmessage = async (msg: InsertMsg) => {
-  if (msg.type !== 'insert-text') return;
+function makeTextNode(text: string, hex?: string): TextNode {
+  const node = figma.createText();
+  node.fontName = { family: 'Courier New', style: 'Regular' };
+  node.fontSize = 10;
+  node.characters = text;
+  if (hex) node.fills = [hexToSolidPaint(hex)];
+  return node;
+}
 
+figma.ui.onmessage = async (msg: InsertMsg) => {
   try {
     await figma.loadFontAsync({ family: 'Courier New', style: 'Regular' });
-    const node = figma.createText();
-    node.fontName = { family: 'Courier New', style: 'Regular' };
-    node.fontSize = 10;
-    node.characters = msg.text;
 
-    if (msg.ranges && msg.ranges.length > 0) {
-      const len = node.characters.length;
-      // Yield every N fill operations so Figma's UI thread stays responsive
-      // for large inputs. Without this, hundreds of setRangeFills calls back
-      // to back can lock the sandbox long enough for Figma to kill the plugin.
-      const YIELD_EVERY = 50;
-      let i = 0;
-      for (const range of msg.ranges) {
-        const start = Math.max(0, Math.min(range.start, len));
-        const end = Math.max(0, Math.min(range.end, len));
-        if (start >= end) continue;
-        node.setRangeFills(start, end, [hexToSolidPaint(range.hex)]);
-        if (++i % YIELD_EVERY === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-      }
+    if (msg.type === 'insert-text') {
+      const node = makeTextNode(msg.text);
+      positionNextToSelection(node);
+      figma.currentPage.selection = [node];
+      figma.viewport.scrollAndZoomIntoView([node]);
+      figma.notify('ASCII text inserted');
+      figma.ui.postMessage({ type: 'insert-done' });
+      return;
     }
 
-    positionNextToSelection(node);
-    figma.currentPage.selection = [node];
-    figma.viewport.scrollAndZoomIntoView([node]);
-    figma.notify('ASCII text inserted');
-    figma.ui.postMessage({ type: 'insert-done' });
+    if (msg.type === 'insert-layered') {
+      // Build one TextNode per color. Stack them at the same origin inside
+      // a group so the composite renders identically to the preview. Each
+      // node has exactly one fill — no setRangeFills. Cost scales with
+      // unique colors (tens), not characters (thousands).
+      const { fullText, layers } = msg;
+
+      // Anchor node: same character positions as every layer, default fill.
+      // Gives the group a consistent bounding box and fills cells that
+      // don't belong to any quantized color.
+      const anchor = makeTextNode(fullText);
+      positionNextToSelection(anchor);
+
+      const nodes: TextNode[] = [anchor];
+      const { x: ax, y: ay } = anchor;
+
+      for (const layer of layers) {
+        const node = makeTextNode(layer.text, layer.hex);
+        node.x = ax;
+        node.y = ay;
+        figma.currentPage.appendChild(node);
+        nodes.push(node);
+      }
+
+      // Group everything so the stack moves as one. User can ungroup to
+      // edit individual color layers (or change the font across all of
+      // them with a single cross-layer selection).
+      const group = figma.group(nodes, figma.currentPage);
+      group.name = 'ASCII art (color)';
+
+      figma.currentPage.selection = [group];
+      figma.viewport.scrollAndZoomIntoView([group]);
+      figma.notify(`ASCII art inserted · ${layers.length} color layers`);
+      figma.ui.postMessage({ type: 'insert-done' });
+      return;
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     figma.notify(`Insert failed: ${message}`, { error: true });
